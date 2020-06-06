@@ -1,0 +1,129 @@
+"""
+服务端 v3.0
+使用多进程tcp并发
+1. 创建套接字对象
+2. 设置端口重用
+3. 绑定端口
+4. 进行监听处理 listen
+5. 循环接收连接的请求 accept
+6. 处理客户端发送的注册请求
+7. 处理客户端发送的登录请求
+8. 处理查询单词的请求
+"""
+from socket import *
+from multiprocessing import Process
+from dict_db import Database
+
+HOST = "127.0.0.1"
+PORT = 12306
+ADDR = (HOST, PORT)
+db = Database()
+
+
+def handle(c):
+    while True:
+        data = c.recv(1024).decode()
+        if data[0] == "R":  # 处理注册请求
+            do_register(c, data)
+        elif data[0] == "L":  # 处理登录请求
+            do_login(c, data)
+        elif data[0] == "Q":  # 处理查询单词的请求
+            do_query(c, data)
+
+def do_query(c, data):
+    """
+    1. 处理客户端发来的请求，解析数据，获得username和word
+    2. 查询数据库
+    3. 没查询一个单词，就要在历史记录表(history)中插入一条记录
+    4. 给客户端发送响应
+    Q nfx nice
+    :param c:
+    :param data:
+    :return:
+    """
+    username = data.split(" ")[1]
+    word = data.split(" ")[2]
+    # 查询单词解释
+    mean = db.query(word)
+    # 增加历史记录
+    db.insert_history(username, word)
+    if mean:
+        # nice: adj.decribe .....
+        msg = "{}: {}".format(word, mean)
+    else:
+        msg = "该单词不在字典中，查询失败"
+    c.send(msg.encode())
+
+
+def do_login(c, data):
+    """
+    1. 处理客户端发来的请求，解析数据，获得username和password
+    2. 查询数据库
+    3. 给客户端发送响应
+    :return:
+    """
+    # 1. 处理客户端发来的请求
+    username = data.split(" ")[1]
+    password = data.split(" ")[2]
+    # 2. 查询数据库
+    if db.login(username, password):
+        c.send(b"OK")
+    else:
+        c.send(b"Fail")
+
+def do_register(c, data):
+    """
+    查询user表中是否存在username
+    :param c:
+    :param data:
+    :return:
+    """
+    # R nfx 123456  -> ["R", "nfx", "123456"]
+    username = data.split(" ")[1]
+    password = data.split(" ")[2]
+    # 判断数据库中是否存在username的用户
+    if db.register(username, password):
+        c.send(b"OK")
+    else:
+        c.send(b"Fail")
+
+def main():
+    s = socket()  # 创建套接字对象
+    s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)  # 设置端口可重用
+    s.bind(ADDR)  # 绑定地址
+    s.listen(5)  # 监听
+    print("正在监听12306端口......")
+
+    while True:
+        try:
+            # 循环接收客户端的连接请求，是一个阻塞方法
+            c, addr = s.accept()
+            print("同客户端连接成功，地址为: {}".format(addr))
+        except Exception as e:
+            print(e)
+            continue
+
+        # 创建多进程去处理请求
+        client = Process(target=handle, args=(c, ))
+        client.daemon = True
+        client.start()
+
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
